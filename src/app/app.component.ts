@@ -6,5 +6,10 @@ import { Component } from '@angular/core';
   styleUrls: ['./app.component.css']
 })
 export class AppComponent {
-  title = 'app';
+  title = 'stock-api-crawling';
+  points = 1;
+
+  plus1() {
+    this.points++;
+  }
 }
