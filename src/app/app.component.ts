@@ -12,4 +12,8 @@ export class AppComponent {
   plus1() {
     this.points++;
   }
+
+  log1() {
+    console.log('This is console log function' + this.points);
+  }
 }
