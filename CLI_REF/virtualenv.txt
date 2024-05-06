@@ -1,0 +1,11 @@
+# 설치 cli
+pip3 install virtualenv virtualenvwrapper
+# 가상환경 생성 / 삭제
+mkvirtualenv --python=python[version] [가상환경이름]
+mkvirtualenv [가상환경이름] -p [python-path]
+rmvirtualenv [가상환경이름]
+# 가상환경 리스트확인 / 접속
+workon
+workon [가상환경이름]
+# 32bit 설치를 위해서는 32bit 파이썬 설치버젼이 있어야 함
+mkvirtualenv --python="C:\Python37-32\python.exe" stock-api-crawling
