@@ -148,9 +148,20 @@ class MongoDBHandler:
         if collection_name is not None and not collection_name:
             raise Exception("Collection name must be provided when specified.")
     
+    def list_collections(self, db_name):
+        db = self._client[db_name]
+        return db.list_collection_names()
+    
     # MongoDB의 데이터베이스에 컬렉션이 있는지 확인
     def check_database_exists(self, db_name):
         """Check if the specified database has any collections."""
         self.validate_params(db_name)
         # 해당 데이터베이스에 컬렉션 리스트를 가져와서 확인
         return len(self._client[db_name].list_collection_names()) > 0
+    
+    # 각 컬렉션에서 특정 컬럼 삭제
+    def delete_column(self, db_name, column_name):
+        self.validate_params(db_name)
+        collection_names = self.list_collections(db_name)
+        for collection_name in collection_names:
+            self._client[db_name][collection_name].update_many({}, {"$unset": {column_name: ""}})

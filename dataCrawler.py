@@ -1,7 +1,7 @@
 import sys
 import gc
 
-from api.creonAPI import CpStockChart, CpCodeMgr
+from api.creonAPI import CpStockChart, CpCodeMgr, CpStockUniWeek
 
 from common.loggerConfig import setup_logger
 from util.autoLogin import autoLogin
@@ -28,11 +28,13 @@ class MainWindow():
         # Creon API Import
         self.objStockChart = CpStockChart()
         self.objCodeMgr = CpCodeMgr()
+        self.objStockUniWeek = CpStockUniWeek()
         
         # Initialize MongoDBHandler
         self.db_handler = MongoDBHandler()
 
         self.rcv_data = dict()  # RQ후 받아온 데이터 저장 멤버
+        self.rcv_data2 = dict()
         self.update_status_msg = ''  # log 에 출력할 메세지 저장 멤버
         self.return_status_msg = ''  # log 에 출력할 메세지 저장 멤버
         
@@ -42,25 +44,48 @@ class MainWindow():
         self.sv_view_model = None
         self.db_view_model = None
 
+        # 시간외단일가 수집 잘 못 했을 때 삭제하는 코드
+        # self.db_handler.delete_column("sp_day", "diff_rate")
+        # sp_day 의 특정 날짜의 수집 데이터 삭제하기
+        # condition = {"date": 20240516}
+        # collections = self.db_handler.list_collections("sp_day")
+        # for collection in collections:
+        #     result = self.db_handler.delete_items(condition, db_name="sp_day", collection_name=collection)
+        #     print(f"Deleted {result.deleted_count} documents from collection {collection}")
+
         self.code_name_list_update()
-        print("종목코드 및 종목명 업데이트 완료")
+        print("종목코드 및 종목명 업데이트 완료")  # self.sv_code_df
         
         # self.db_name = ['sp_day', 'sp_1min','sp_week', 'sp_month']
-        self.db_name = ['sp_day', 'sp_1min']
-        
+        self.db_name = ['sp_1min', 'sp_day']
+        # self.db_name = ['sp_day']
+    
         for db_name in self.db_name:
             self.db_name = db_name
             self.connect_code_list_view()
             self.update_price_db()
             if self.db_name == 'sp_day':
-                self.update_marketC_col()
+                # self.update_marketC_col() # 이제 할 필요없음
+                self.update_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
 
+        
     def code_name_list_update(self):
         # 1. API 서버에서 종목코드와 종목명 가져오기
         sv_code_list = self.objCodeMgr.get_code_list(1) + self.objCodeMgr.get_code_list(2)
         sv_name_list = list(map(self.objCodeMgr.get_code_name, sv_code_list))
-        self.sv_code_df = pd.DataFrame({'종목코드': sv_code_list, '종목명': sv_name_list})
+        sv_market_list = list(map(self.objCodeMgr.get_market_kind, sv_code_list))
+        self.sv_code_df = pd.DataFrame({'종목코드': sv_code_list, '종목명': sv_name_list, '소속부': sv_market_list}) # 소속부 0:구분없음, 1:거래소, 2:코스닥, 3:K-OTC, 4:KRM, 5:KONEX
         
+        # KOSPI와 KOSDAQ 업종코드 추가
+        additional_data = pd.DataFrame({
+            '종목코드': ['U001', 'U201'],
+            '종목명': ['KOSPI', 'KOSDAQ'],
+            '소속부': [1, 2]
+        })
+        
+        # 기존 DataFrame에 새로운 데이터 추가
+        self.sv_code_df = pd.concat([self.sv_code_df, additional_data], ignore_index=True)
+
         # 2. 현재 날짜를 YYYYMMDD 형식으로 포매팅
         today = int(datetime.today().strftime('%Y%m%d'))
         
@@ -73,19 +98,48 @@ class MainWindow():
                     '$set': {
                         'date': today,
                         'stock_name': row['종목명'],
-                        'stock_code': row['종목코드']
+                        'stock_code': row['종목코드'],
+                        'market_kind': row['소속부']
                     }
                 }
                 self.db_handler.upsert_item(condition={'stock_code': row['종목코드']}, update_value=update_value, db_name='sp_common', collection_name='sp_all_code_name')
+        # 4. Local MongoDB의 sp_day DB에서 종목코드 컬렉션 목록 가져오기
+        local_code_list = self.db_handler.list_collections('sp_day')
+        # 5. sp_all_code_name 컬렉션에서 현재 존재하는 종목코드 목록 가져오기
+        existing_codes = self.db_handler.find_items_distinct(db_name='sp_common', collection_name='sp_all_code_name', distinct_col='stock_code')
+        # 6. sp_all_code_name에 없는 종목코드 추가
+        for code in local_code_list:
+            if code not in existing_codes:
+                condition = {'stock_code': code, 'date': today}
+                update_value = {
+                    '$set': {
+                        'date': today,
+                        'stock_name': '없음',
+                        'stock_code': code,
+                        'market_kind': 0
+                    }
+                }
+                self.db_handler.upsert_item(condition={'stock_code': code}, update_value=update_value, db_name='sp_common', collection_name='sp_all_code_name')
 
+        
     def connect_code_list_view(self):
-        # 1. API 서버 종목코드 가져와서 종목명과 조합
+        # 1. API 서버에서 종목코드와 종목명 가져오기
         sv_code_list = self.objCodeMgr.get_code_list(1) + self.objCodeMgr.get_code_list(2)
         sv_name_list = list(map(self.objCodeMgr.get_code_name, sv_code_list))
-        self.sv_code_df = pd.DataFrame({'종목코드': sv_code_list,'종목명': sv_name_list},columns=('종목코드', '종목명'))
+        sv_market_list = list(map(self.objCodeMgr.get_market_kind, sv_code_list))
+        self.sv_code_df = pd.DataFrame({'종목코드': sv_code_list, '종목명': sv_name_list, '소속부': sv_market_list}) # 소속부 0:구분없음, 1:거래소, 2:코스닥, 3:K-OTC, 4:KRM, 5:KONEX
         
-        # 2. 로컬 DB 에 저장된 종목 정보를 가져와서 dataframe 으로 저장
-        # 로컬 DB 에 저장된 종목 정보 가져와서 dataframe 으로 저장
+        # KOSPI와 KOSDAQ 업종코드 추가
+        additional_data = pd.DataFrame({
+            '종목코드': ['U001', 'U201'],
+            '종목명': ['KOSPI', 'KOSDAQ'],
+            '소속부': [1, 2]
+        })
+        
+        # 기존 DataFrame에 새로운 데이터 추가
+        self.sv_code_df = pd.concat([self.sv_code_df, additional_data], ignore_index=True)
+        
+        # 2. 로컬 DB 에 저장된 종목 정보를 가져와서 dataframe 으로 저장 및 Index 처리하기
         db_code_list = self.db_handler._client[self.db_name].list_collection_names()
         db_name_list = list(map(self.objCodeMgr.get_code_name, db_code_list))
         if len(db_name_list) == 0:
@@ -116,15 +170,15 @@ class MainWindow():
             if self.db_name == 'sp_1min': # 1분봉인 경우
                 print("======== 1min 수집중 입니다.========")
             elif self.db_name == 'sp_3min': # 3분봉인 경우
-                print("======== 3min 입니다.======== ")
+                print("======== 3min 수집중 입니다.======== ")
             elif self.db_name == 'sp_5min': # 5분봉인 경우
-                print("======== 5min 입니다.======== ")
+                print("======== 5min 수집중 입니다.======== ")
             elif self.db_name == 'sp_day': # 일봉인 경우    
-                print("======== 일봉입니다.======== ")
+                print("======== 일봉 수집중 입니다.======== ")
             elif self.db_name == 'sp_week': # 주봉인 경우    
-                print("======== week 입니다.======== ")
+                print("======== 주봉 수집중 입니다.======== ")
             elif self.db_name == 'sp_month': # 월봉인 경우
-                print("======== month 입니다.======== ")
+                print("======== 월봉 수집중 입니다.======== ")
             elif self.db_name == None:
                 print("======== 없는 DB 입니다.======== ")
             else: # 그 외 다른값인 경우
@@ -134,7 +188,6 @@ class MainWindow():
                 {'종목코드': db_code_list, '종목명': db_name_list, '갱신날짜': db_latest_list},
                 columns=('종목코드', '종목명', '갱신날짜'))
 
-    # sp_ck DB 를 새로 만들고 여기에 컬렉션 생성 (sp_ck_1min, sp_ck_day, sp_ck_week, sp_ck_month), stockCode, lastUpdate 컬럼에 저장 (YYYYMMDDHHMM)
     def update_price_db(self):
         
         fetch_code_df = self.sv_code_df
@@ -203,9 +256,7 @@ class MainWindow():
         tqdm_range = tqdm.trange(len(fetch_code_df), ncols=100)
         # MongoDB에 데이터를 삽입하는 부분
         for i in tqdm_range:
-            
-            # start_time = time.time()
-            
+
             code = fetch_code_df.iloc[i]
             self.update_status_msg = '[{}] {}'.format(code[0], code[1])
             tqdm_range.set_description(preformat_cjk(self.update_status_msg, 25))
@@ -255,17 +306,13 @@ class MainWindow():
                 for rec in df.to_dict('records')]
             if operations:
                 self.db_handler._client[self.db_name][code['종목코드']].bulk_write(operations, ordered=False)
-                
-            # end_time = time.time()
-            # elapsed_time = end_time - start_time
-            # print(f"{self.db_name} and {code['종목코드']} Function executed in {elapsed_time} seconds")
-            # log.info((f"{self.db_name} and {code['종목코드']} writed in {elapsed_time} seconds"))
-            
+
             del df
             gc.collect()
 
         self.update_status_msg = ''
         self.connect_code_list_view()
+        print("============= 가격 데이터 수집 완료 ===================")
         
     def get_weekly_date(self, latest_date):
         latest_date_str = str(latest_date)
@@ -389,5 +436,79 @@ class MainWindow():
         self.update_status_msg = ''
         self.connect_code_list_view()
 
+    def update_outTime(self):
+        print("========시간외 단일가 수집중입니다.===========")
+        all_collections = self.db_handler._client['sp_day'].list_collection_names()
+        
+        # 제외할 collection 이름들
+        exclude_collections = {'U001', 'U201'}
+        
+        # 제외한 collection 이름 목록을 생성합니다.
+        collections = [col for col in all_collections if col not in exclude_collections]
+
+        outTimeData = []
+        for code in collections:
+            if not is_market_open(): # 장 중이 아니라면
+                price_latest = self.db_handler.find_item({}, 'sp_day', code, sort=[('date', -1)])
+                price_lastest_date = price_latest['date']
+                
+                if self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code, sort=[('date', -1)]):
+                    latest_entry_with_diff_rate = self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code, sort=[('date', -1)])
+                    if latest_entry_with_diff_rate['date'] >= price_lastest_date:
+                        pass
+                else:
+                    condition = {'stock_code': code}
+                    item = self.db_handler.find_item(condition, db_name='sp_common', collection_name='sp_all_code_name')
+                    stock_name = item['stock_name'] if item else None
+                    outTimeData.append({'종목코드': code, '종목명': stock_name})
+
+        fetch_code_df = pd.DataFrame(outTimeData)
+        print("fetch_code_df : ", len(fetch_code_df))
+
+        count = 10000
+        tqdm_range = tqdm.trange(len(fetch_code_df), ncols=100)
+        
+        for i in tqdm_range:
+            code = fetch_code_df.iloc[i]
+            self.return_status_msg = '[{}] {}'.format(code['종목코드'], code['종목명'])
+            tqdm_range.set_description(self.return_status_msg)
+            
+            from_date = 0
+            # diff_rate가 있는 가장 최신의 date를 찾음
+            latest_entry_with_diff_rate = self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code['종목코드'], sort=[('date', -1)])
+            # 해당 종목코드의 데이터 중 가장 오래된 날짜를 찾음
+            earliest_entry = self.db_handler.find_item({}, 'sp_day', code['종목코드'], sort=[('date', 1)])
+            
+            # 데이터가 존재하지 않으면 diff_rate를 요청하지 않음
+            if not earliest_entry:
+                continue
+
+            if latest_entry_with_diff_rate:
+                from_date = latest_entry_with_diff_rate['date']
+            else:
+                from_date = earliest_entry['date']
+
+            if self.objStockUniWeek.request_stock_data(code['종목코드'], count, self, from_date) == False:
+                continue
+
+            df = pd.DataFrame(self.rcv_data2)
+            df = df[df['date'] > from_date].iloc[::-1]
+            df.reset_index(inplace=True, drop=True)
+
+            df.drop_duplicates(subset='date', keep='last', inplace=True)
+            df.dropna(subset=['date'], inplace=True)  # date 컬럼이 null인 행 제거
+            operations = [
+                UpdateOne({'date': rec['date']}, {'$set': {'diff_rate': rec['diff_rate']}}, upsert=False)
+                for rec in df.to_dict('records')
+            ]
+            if operations:
+                self.db_handler._client['sp_day'][code['종목코드']].bulk_write(operations, ordered=False)
+            
+            del df
+            gc.collect()
+
+        self.return_status_msg = ''
+        print("========시간외 단일가 수집완료===========")
+        
 if __name__ == "__main__":
     MainWindow()

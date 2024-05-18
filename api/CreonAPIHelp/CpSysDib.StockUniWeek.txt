@@ -1,0 +1,103 @@
+[시간외 단일가 일자별] CpSysDib.StockUniWeek
+ 
+설명 : 주식종목의시간외단일가일자별주가를수신합니다.
+통신종류 : Request/Reply
+연속여부 : X
+관련 SB/PB 
+StockUniCur (금일시세)
+ 
+관련CYBOS 
+[7026일자별주가]시간외단일가체크박스부분
+ 
+모듈위치
+cpsysdib.dll
+
+Method
+object.SetInputValue(type,value)
+type에해당하는입력데이터를 value 값으로지정합니다
+type: 입력데이터종류
+
+0 - (string) 종목코드
+value: 새로지정할값
+
+value = object.GetHeaderValue(type)
+type에해당하는헤더데이터를반환합니다
+type: 데이터종류
+
+0 - (string) 종목코드
+1 - (short) 데이터개수
+
+반환값: 데이터종류에해당하는값
+value = object.GetDataValue (Type,index)
+
+type에해당하는데이터를반환합니다
+type: 데이터종류
+
+0-(ulong) 일자
+1-(ulong) 시가
+2-(ulong) 고가
+3-(ulong) 저가
+4-(ulong) 종가
+5-(long) 전일대비
+6-(double) 대비율
+7-(char) 대비구분
+
+
+코드
+내용
+'1'
+ 
+상한
+'2'
+ 
+상승
+'3'
+ 
+보합
+'4'
+ 
+하한
+ 
+
+'5'
+ 
+하락
+ 
+
+'6'
+ 
+기세상한
+ 
+
+'7'
+ 
+기세상승
+ 
+
+'8'
+ 
+기세하한
+ 
+
+'9'
+ 
+기세하락
+ 
+
+8-(ulong) 거래량
+
+index: data index
+
+object.Request()
+
+해당하는데이터를요청한다
+
+object.BlockRequest()
+
+데이터요청.Blocking Mode
+
+Event
+
+Object.Received
+
+해당하는데이터를수신했을때발생하는이벤트

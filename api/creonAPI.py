@@ -47,8 +47,7 @@ class CpStockChart:
 
 
     # 차트 요청 - 최근일 부터 개수 기준
-    # @check_PLUS_status
-    def RequestDWM(self, code, dwm, count, caller: 'MainWindow', from_date=0, ohlcv_only=True):
+    def RequestDWM(self, code, dwm, count, caller: 'MainWindow', from_date=0):
         """
         :param code: 종목코드
         :param dwm: 'D':일봉, 'W':주봉, 'M':월봉
@@ -115,7 +114,6 @@ class CpStockChart:
         return True
 
     # 차트 요청 - 분간, 틱 차트
-    # @check_PLUS_status
     def RequestMT(self, code, dwm, tick_range, count, caller: 'MainWindow', from_date=0):
         """
         :param code: 종목 코드
@@ -187,7 +185,7 @@ class CpStockChart:
         del rcv_data['time']
         caller.rcv_data = rcv_data  # 받은 데이터를 caller의 멤버에 저장
         return True
-
+    
 # 종목코드 관리하는 클래스
 class CpCodeMgr:
     def __init__(self):
@@ -211,3 +209,69 @@ class CpCodeMgr:
     def get_code_name(self, code):
         code_name = self.objCodeMgr.CodeToName(code)
         return code_name
+
+    # 종목 코드를 받아 소속부를 반환하는 메소드
+    def get_market_kind(self, code):
+        market_kind = self.objCodeMgr.GetStockMarketKind(code)
+        return market_kind
+
+class CpStockUniWeek:
+    def __init__(self):
+        self.objStockUniWeek = win32com.client.Dispatch("CpSysDib.StockUniWeek")
+
+    def _check_rq_status(self):
+        rqStatus = self.objStockUniWeek.GetDibStatus()
+        rqRet = self.objStockUniWeek.GetDibMsg1()
+        if rqStatus != 0:
+            print(f"통신상태 오류[{rqStatus}]{rqRet}")
+            raise ConnectionError(f"통신상태 오류[{rqStatus}]{rqRet}")
+
+    def apply_delay(self):
+        current_time = datetime.now().time()
+        if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or \
+           (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
+            time.sleep(0.7)
+        else:
+            time.sleep(0.25)
+
+    def request_stock_data(self, code, count, caller=None, from_date=0):
+        self.objStockUniWeek.SetInputValue(0, code)
+
+        rq_column = ('date', 'open', 'high', 'low', 'close','diff', 'diff_rate')
+        rcv_data2 = {}
+        rcv_data2 = {col: [] for col in rq_column}
+
+        rcv_count = 0
+        while count > rcv_count:
+            self.objStockUniWeek.BlockRequest()
+            self._check_rq_status()
+            self.apply_delay()
+
+            rcv_batch_len = self.objStockUniWeek.GetHeaderValue(1)  # 받아온 데이터 개수
+            rcv_batch_len = min(rcv_batch_len, count - rcv_count)  # 정확히 count 개수만큼 받기 위함
+            
+            for i in range(rcv_batch_len):
+                item_date = self.objStockUniWeek.GetDataValue(0, i)
+                if item_date < from_date:
+                    break
+
+                for col_idx, col in enumerate(rq_column):
+                    rcv_data2[col].append(self.objStockUniWeek.GetDataValue(col_idx, i))
+
+            if len(rcv_data2['date']) == 0:  # 데이터가 없는 경우
+                print(code, '데이터 없음')
+                return False
+
+            rcv_oldest_date = rcv_data2['date'][-1]
+            rcv_count += rcv_batch_len
+            if caller:
+                caller.return_status_msg = '{} / {}'.format(rcv_count, count)
+            
+            if not self.objStockUniWeek.Continue:
+                break
+            if rcv_oldest_date < from_date:
+                break
+            
+        if caller:
+            caller.rcv_data2 = rcv_data2  # 받은 데이터를 caller의 멤버에 저장
+        return True
