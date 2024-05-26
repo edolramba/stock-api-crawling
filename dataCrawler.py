@@ -17,6 +17,7 @@ import tqdm
 import time
 from datetime import datetime, timedelta
 
+
 log = setup_logger()  # 로거 설정
 
 class MainWindow():
@@ -52,12 +53,14 @@ class MainWindow():
         # for collection in collections:
         #     result = self.db_handler.delete_items(condition, db_name="sp_day", collection_name=collection)
         #     print(f"Deleted {result.deleted_count} documents from collection {collection}")
+        
 
         self.code_name_list_update()
         print("종목코드 및 종목명 업데이트 완료")  # self.sv_code_df
         
         # self.db_name = ['sp_day', 'sp_1min','sp_week', 'sp_month']
-        self.db_name = ['sp_1min', 'sp_day']
+        self.db_name = ['sp_day','sp_1min']
+        # self.db_name = ['sp_1min', 'sp_day']
         # self.db_name = ['sp_day']
     
         for db_name in self.db_name:
@@ -195,31 +198,32 @@ class MainWindow():
         
         if self.db_name == 'sp_1min': # 1분봉
             tick_unit = '분봉'
-            count = 200000  # 서버 데이터 최대 reach 약 18.5만 이므로 (18/02/25 기준)
+            # count = 200000  # 서버 데이터 최대 reach 약 18.5만 이므로 (18/02/25 기준)
+            count = 2000  # 서버 데이터 최대 reach 약 18.5만 이므로 (18/02/25 기준)
             tick_range = 1
             columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
         elif self.db_name == 'sp_3min': # 3분봉
             tick_unit = '분봉'
-            count = 100000
+            count = 2000
             tick_range = 3
             columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
         elif self.db_name == 'sp_5min': # 5분봉
             tick_unit = '분봉'
-            count = 100000
+            count = 2000
             tick_range = 5
             columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
         elif self.db_name == 'sp_day': # 일봉
             tick_unit = '일봉'
-            count = 10000  # 10000개면 현재부터 1980년 까지의 데이터에 해당함. 충분.
+            count = 14  # 10000개면 현재부터 1980년 까지의 데이터에 해당함. 충분.
             tick_range = 1
             columns=['open', 'high', 'low', 'close', 'volume', 'value', 'marketC'] # 2024.05.05
         elif self.db_name == 'sp_week': # 주봉
             tick_unit = '주봉'
-            count = 2000
+            count = 2000 # 2000
             columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
         elif self.db_name == 'sp_month': # 월봉
             tick_unit = '월봉'
-            count = 500
+            count = 500 # 500
             columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
         else: # 없음
             raise ValueError("Invalid database name provided")
@@ -456,6 +460,15 @@ class MainWindow():
                     latest_entry_with_diff_rate = self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code, sort=[('date', -1)])
                     if latest_entry_with_diff_rate['date'] >= price_lastest_date:
                         pass
+                    else:
+                        condition = {'stock_code': code}
+                        stock_name = self.db_handler.find_item(
+                            condition, 
+                            db_name='sp_common', 
+                            collection_name='sp_all_code_name',
+                            projection={'stock_name': 1, '_id': 0}
+                        )
+                        outTimeData.append({'종목코드': code, '종목명': stock_name})
                 else:
                     condition = {'stock_code': code}
                     item = self.db_handler.find_item(condition, db_name='sp_common', collection_name='sp_all_code_name')
@@ -465,7 +478,7 @@ class MainWindow():
         fetch_code_df = pd.DataFrame(outTimeData)
         print("fetch_code_df : ", len(fetch_code_df))
 
-        count = 10000
+        count = 200
         tqdm_range = tqdm.trange(len(fetch_code_df), ncols=100)
         
         for i in tqdm_range:

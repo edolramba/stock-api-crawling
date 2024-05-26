@@ -88,12 +88,14 @@ class MongoDBHandler:
     def find_items_distinct(self, condition=None, db_name=None, collection_name=None, distinct_col=None):
         self.validate_params(db_name, collection_name)
         condition = condition if isinstance(condition, dict) else {}
-        return self._client[db_name][collection_name].find(condition, {"_id": False}, no_cursor_timeout=True, cursor_type=CursorType.EXHAUST).distinct(distinct_col)
+        with self._client.start_session() as session:
+            return self._client[db_name][collection_name].find(condition, {"_id": False}, no_cursor_timeout=True, cursor_type=CursorType.EXHAUST, session=session).distinct(distinct_col)
 
     def find_items_id(self, condition=None, db_name=None, collection_name=None):
         self.validate_params(db_name, collection_name)
         condition = condition if isinstance(condition, dict) else {}
-        return self._client[db_name][collection_name].find(condition, {"_id": True}, no_cursor_timeout=True, cursor_type=CursorType.EXHAUST)
+        with self._client.start_session() as session:
+            return self._client[db_name][collection_name].find(condition, {"_id": True}, no_cursor_timeout=True, cursor_type=CursorType.EXHAUST, session=session)
 
     def find_item_id(self, condition=None, db_name=None, collection_name=None):
         self.validate_params(db_name, collection_name)
