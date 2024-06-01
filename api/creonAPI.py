@@ -215,6 +215,11 @@ class CpCodeMgr:
         market_kind = self.objCodeMgr.GetStockMarketKind(code)
         return market_kind
 
+    # 종목 코드를 받아 주식상태를 반환하는 메소드 typedefenum({CPC_STOCK_STATUS_NORMAL= 0, CPC_STOCK_STATUS_STOP= 1, CPC_STOCK_STATUS_BREAK= 2} }CPE_SUPERVISION_KIND;
+    def get_code_status(self, code):
+        code_status = self.objCodeMgr.GetStockStatusKind(code)
+        return code_status
+
 class CpStockUniWeek:
     def __init__(self):
         self.objStockUniWeek = win32com.client.Dispatch("CpSysDib.StockUniWeek")

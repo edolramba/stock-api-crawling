@@ -15,9 +15,7 @@ from pymongo import UpdateOne
 import pandas as pd
 import tqdm
 import time
-# from datetime import datetime, timedelta
-import time as t
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, timedelta
 
 
 log = setup_logger()  # 로거 설정
@@ -58,94 +56,58 @@ class MainWindow():
         
         self.code_name_list_update()
         print("종목코드 및 종목명 업데이트 완료")  # self.sv_code_df
+        return
         # self.db_name = ['sp_day', 'sp_1min','sp_week', 'sp_month']
         # self.db_name = ['sp_day','sp_1min']
         self.db_name = ['sp_1min', 'sp_day']
-
+        # self.db_name = ['sp_day']
+    
         for db_name in self.db_name:
             self.db_name = db_name
             self.connect_code_list_view()
             self.update_price_db()
             if self.db_name == 'sp_day':
-                # 현재 시간을 확인
-                current_time = datetime.now()
-                target_time = datetime.combine(current_time.date(), dt_time(18, 1))
-                today_weekday = current_time.weekday()
+                # self.update_marketC_col() # 이제 할 필요없음
+                self.update_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
 
-                # 주말이면 바로 실행
-                if today_weekday >= 5:  # Saturday or Sunday
-                    self.update_outTime()
-                else:
-                    # 현재 시간이 오후 6시 1분 이후인지 확인
-                    if current_time.time() >= dt_time(18, 1):
-                        self.update_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
-                    else:
-                        print(f"현재 시간은 {current_time.strftime('%H:%M:%S')}입니다. 오후 6시 1분까지 기다립니다.")
-                        # 남은 시간 계산
-                        time_to_wait = (target_time - current_time).total_seconds()
-
-                        # 대기 시작 알림
-                        print(f"기다리는 중입니다. 남은 시간: {int(time_to_wait // 60)}분 {int(time_to_wait % 60)}초")
-
-                        while time_to_wait > 0:
-                            # 5분마다 남은 시간을 출력
-                            if time_to_wait % 300 == 0 or time_to_wait < 300:
-                                remaining_minutes = int(time_to_wait // 60)
-                                remaining_seconds = int(time_to_wait % 60)
-                                print(f"남은 시간: {remaining_minutes}분 {remaining_seconds}초")
-
-                            # 1초 대기
-                            t.sleep(1)
-                            time_to_wait -= 1
-
-                        self.update_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
-
+        
     def code_name_list_update(self):
         # 1. API 서버에서 종목코드와 종목명 가져오기
         sv_code_list = self.objCodeMgr.get_code_list(1) + self.objCodeMgr.get_code_list(2)
         sv_name_list = list(map(self.objCodeMgr.get_code_name, sv_code_list))
         sv_market_list = list(map(self.objCodeMgr.get_market_kind, sv_code_list))
         sv_status_list  = list(map(self.objCodeMgr.get_code_status, sv_code_list))
-        # 소속부 0:구분없음, 1:거래소, 2:코스닥, 3:K-OTC, 4:KRM, 5:KONEX  종목상태 : 0:정상, 1:거래정지, 2:거래중단
-        self.sv_code_df = pd.DataFrame({'종목코드': sv_code_list, '종목명': sv_name_list, '소속부': sv_market_list, '종목상태': sv_status_list})
+        self.sv_code_df = pd.DataFrame({'종목코드': sv_code_list, '종목명': sv_name_list, '소속부': sv_market_list, '종목상태': sv_status_list}) # 소속부 0:구분없음, 1:거래소, 2:코스닥, 3:K-OTC, 4:KRM, 5:KONEX
         
         # KOSPI와 KOSDAQ 업종코드 추가
         additional_data = pd.DataFrame({
             '종목코드': ['U001', 'U201'],
             '종목명': ['KOSPI', 'KOSDAQ'],
             '소속부': [1, 2],
-            '종목상태': 0
+            '종목상태': 1
         })
         
         # 기존 DataFrame에 새로운 데이터 추가
         self.sv_code_df = pd.concat([self.sv_code_df, additional_data], ignore_index=True)
 
-        if not is_market_open():
-            latest_date = available_latest_date()
-            latest_date = latest_date // 10000  # 나머지를 버리고 정수 부분만 반환
-            # 2. 현재 날짜를 YYYYMMDD 형식으로 포매팅
-            # today = int(datetime.today().strftime('%Y%m%d'))
+        # 2. 현재 날짜를 YYYYMMDD 형식으로 포매팅
+        today = int(datetime.today().strftime('%Y%m%d'))
         
         # 3. MongoDB에 데이터 upsert 하지만 오늘 날짜에 이미 업데이트된 항목은 제외
         for idx, row in self.sv_code_df.iterrows():
-            condition = {'stock_code': row['종목코드']}
-            update_value = {
-                '$set': {
-                    'date': latest_date,
-                    'stock_name': row['종목명'],
-                    'stock_code': row['종목코드'],
-                    'market_kind': row['소속부'],
-                    'stock_status': row['종목상태']
-                },
-                '$setOnInsert': {
-                    'sp_1min': None,
-                    'sp_day': None,
-                    'sp_week': None,
-                    'sp_month': None
+            condition = {'stock_code': row['종목코드'], 'date': today}
+            existing_item = self.db_handler.find_item(condition, db_name='sp_common', collection_name='sp_all_code_name')
+            if not existing_item:
+                update_value = {
+                    '$set': {
+                        'date': today,
+                        'stock_name': row['종목명'],
+                        'stock_code': row['종목코드'],
+                        'market_kind': row['소속부'],
+                        'stock_status': row['종목상태']
+                    }
                 }
-            }
-            self.db_handler.upsert_item(condition, update_value, db_name='sp_common', collection_name='sp_all_code_name')
-        
+                self.db_handler.upsert_item(condition={'stock_code': row['종목코드']}, update_value=update_value, db_name='sp_common', collection_name='sp_all_code_name')
         # 4. Local MongoDB의 sp_day DB에서 종목코드 컬렉션 목록 가져오기
         local_code_list = self.db_handler.list_collections('sp_day')
         # 5. sp_all_code_name 컬렉션에서 현재 존재하는 종목코드 목록 가져오기
@@ -153,25 +115,37 @@ class MainWindow():
         # 6. sp_all_code_name에 없는 종목코드 추가
         for code in local_code_list:
             if code not in existing_codes:
-                condition = {'stock_code': code}
+                condition = {'stock_code': code, 'date': today}
                 update_value = {
                     '$set': {
-                        'date': latest_date,
+                        'date': today,
                         'stock_name': '없음',
                         'stock_code': code,
                         'market_kind': 0,
                         'stock_status': 2
-                    },
-                    '$setOnInsert': {
-                        'sp_1min': None,
-                        'sp_day': None,
-                        'sp_week': None,
-                        'sp_month': None
                     }
                 }
-                self.db_handler.upsert_item(condition, update_value, db_name='sp_common', collection_name='sp_all_code_name')
+                self.db_handler.upsert_item(condition={'stock_code': code}, update_value=update_value, db_name='sp_common', collection_name='sp_all_code_name')
 
+        
     def connect_code_list_view(self):
+        # 1. API 서버에서 종목코드와 종목명 가져오기
+        sv_code_list = self.objCodeMgr.get_code_list(1) + self.objCodeMgr.get_code_list(2)
+        sv_name_list = list(map(self.objCodeMgr.get_code_name, sv_code_list))
+        sv_market_list = list(map(self.objCodeMgr.get_market_kind, sv_code_list))
+        self.sv_code_df = pd.DataFrame({'종목코드': sv_code_list, '종목명': sv_name_list, '소속부': sv_market_list}) # 소속부 0:구분없음, 1:거래소, 2:코스닥, 3:K-OTC, 4:KRM, 5:KONEX
+        
+        # KOSPI와 KOSDAQ 업종코드 추가
+        additional_data = pd.DataFrame({
+            '종목코드': ['U001', 'U201'],
+            '종목명': ['KOSPI', 'KOSDAQ'],
+            '소속부': [1, 2]
+        })
+        
+        # 기존 DataFrame에 새로운 데이터 추가
+        self.sv_code_df = pd.concat([self.sv_code_df, additional_data], ignore_index=True)
+        
+        # 2. 로컬 DB 에 저장된 종목 정보를 가져와서 dataframe 으로 저장 및 Index 처리하기
         db_code_list = self.db_handler._client[self.db_name].list_collection_names()
         db_name_list = list(map(self.objCodeMgr.get_code_name, db_code_list))
         if len(db_name_list) == 0:
@@ -179,92 +153,93 @@ class MainWindow():
         else:
             log.info(db_name_list)
             for code in db_code_list:
+                # 'date' 필드에 인덱스가 있는지 확인하고 없으면 생성
+                # 인덱스 정보를 가져와서 'date' 인덱스가 있는지 확인
                 indexes = self.db_handler._client[self.db_name][code].index_information()
-                if 'date_1' not in indexes:
+                if 'date_1' not in indexes:  # 'date_1'는 오름차순 인덱스를 나타냄
+                    # 'date' 필드에 대해 인덱스 생성
                     self.db_handler._client[self.db_name][code].create_index('date', name='date_1')
                     log.info("Index on 'date' created.")
                 else:
                     log.info("Index on 'date' already exists.")
-        
+            
+        # 3. 로컬 DB 에 저장된 종목의 Data 가 어느시점까지 저장되어 있는지 체크
         db_latest_list = []
         for db_code in db_code_list:
             latest_entry = self.db_handler.find_item({}, self.db_name, db_code, sort=[('date', -1)], projection={'date': 1})
+            # min : 202204050901, day, week, month : 19860228
             db_latest_list.append(latest_entry['date'] if latest_entry else None)
-        
+            # print(db_code, "의 최근 저장된 날짜 : ", latest_entry)
+            
+        # 현재 db에 저장된 'date' column의 단위(분/일) 확인
         if db_latest_list:
-            if self.db_name == 'sp_1min':
+            if self.db_name == 'sp_1min': # 1분봉인 경우
                 print("======== 1min 수집중 입니다.========")
-            elif self.db_name == 'sp_day':
+            elif self.db_name == 'sp_3min': # 3분봉인 경우
+                print("======== 3min 수집중 입니다.======== ")
+            elif self.db_name == 'sp_5min': # 5분봉인 경우
+                print("======== 5min 수집중 입니다.======== ")
+            elif self.db_name == 'sp_day': # 일봉인 경우    
                 print("======== 일봉 수집중 입니다.======== ")
-            elif self.db_name == 'sp_week':
+            elif self.db_name == 'sp_week': # 주봉인 경우    
                 print("======== 주봉 수집중 입니다.======== ")
-            elif self.db_name == 'sp_month':
+            elif self.db_name == 'sp_month': # 월봉인 경우
                 print("======== 월봉 수집중 입니다.======== ")
-            else:
+            elif self.db_name == None:
+                print("======== 없는 DB 입니다.======== ")
+            else: # 그 외 다른값인 경우
                 print("분류가 없는 데이터 입니다.")
-        
+
         self.db_code_df = pd.DataFrame(
                 {'종목코드': db_code_list, '종목명': db_name_list, '갱신날짜': db_latest_list},
                 columns=('종목코드', '종목명', '갱신날짜'))
 
-        # sp_common DB에서 latest_date와 동일한 self.db_name 컬럼의 데이터를 가져와서 self.db_code_df에 추가
-        latest_date = available_latest_date()
-        if not is_market_open():
-            if self.db_name == 'sp_1min':
-                latest_date = latest_date // 10000
-            additional_codes = self.db_handler.find_items(
-                {self.db_name: latest_date},
-                db_name='sp_common',
-                collection_name='sp_all_code_name',
-                projection={'stock_code': 1, 'stock_name': 1, self.db_name: 1, '_id': 0}
-            )
-            
-            if additional_codes:
-                additional_codes_df = pd.DataFrame(additional_codes)
-                additional_codes_df.rename(columns={self.db_name: '갱신날짜', 'stock_code': '종목코드', 'stock_name': '종목명'}, inplace=True)
-                
-                # sp_1min의 경우, date 값을 1530으로 변환
-                if self.db_name == 'sp_1min':
-                    additional_codes_df['갱신날짜'] = additional_codes_df['갱신날짜'].apply(lambda x: int(str(x) + '1530'))
-
-                # 기존 데이터프레임에 추가 데이터프레임을 병합하고 중복 종목 코드를 제거하여 최신 값으로 대체
-                self.db_code_df = pd.concat([self.db_code_df, additional_codes_df], ignore_index=True).drop_duplicates(subset='종목코드', keep='last')
-
-        print(f"당일 업데이트 완료된 데이터 및 건수: {len(self.db_code_df)}")
-        print(self.db_code_df)
-    
     def update_price_db(self):
-        fetch_code_df = self.sv_code_df[self.sv_code_df['종목상태'] == 0]
+        
+        fetch_code_df = self.sv_code_df
         db_code_df = self.db_code_df
         
-        if self.db_name == 'sp_1min':
+        if self.db_name == 'sp_1min': # 1분봉
+            tick_unit = '분봉'
+            # count = 200000  # 서버 데이터 최대 reach 약 18.5만 이므로 (18/02/25 기준)
+            count = 2000  # 서버 데이터 최대 reach 약 18.5만 이므로 (18/02/25 기준)
+            tick_range = 1
+            columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
+        elif self.db_name == 'sp_3min': # 3분봉
             tick_unit = '분봉'
             count = 2000
-            tick_range = 1
-            columns=['open', 'high', 'low', 'close', 'volume', 'value']
-        elif self.db_name == 'sp_day':
-            tick_unit = '일봉'
-            count = 14
-            tick_range = 1
-            columns=['open', 'high', 'low', 'close', 'volume', 'value', 'marketC']
-        elif self.db_name == 'sp_week':
-            tick_unit = '주봉'
+            tick_range = 3
+            columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
+        elif self.db_name == 'sp_5min': # 5분봉
+            tick_unit = '분봉'
             count = 2000
-            columns=['open', 'high', 'low', 'close', 'volume', 'value']
-        elif self.db_name == 'sp_month':
+            tick_range = 5
+            columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
+        elif self.db_name == 'sp_day': # 일봉
+            tick_unit = '일봉'
+            count = 14  # 10000개면 현재부터 1980년 까지의 데이터에 해당함. 충분.
+            tick_range = 1
+            columns=['open', 'high', 'low', 'close', 'volume', 'value', 'marketC'] # 2024.05.05
+        elif self.db_name == 'sp_week': # 주봉
+            tick_unit = '주봉'
+            count = 2000 # 2000
+            columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
+        elif self.db_name == 'sp_month': # 월봉
             tick_unit = '월봉'
-            count = 500
-            columns=['open', 'high', 'low', 'close', 'volume', 'value']
-        else:
+            count = 500 # 500
+            columns=['open', 'high', 'low', 'close', 'volume', 'value'] # 2024.05.05
+        else: # 없음
             raise ValueError("Invalid database name provided")
-
+        
+        # 분봉/일봉에 대해서만 아래 코드가 효과가 있음.
         if not is_market_open():
             latest_date = available_latest_date()
+            print("최초 latest_date : ", latest_date)
             if tick_unit == '일봉':
-                latest_date = latest_date // 10000
+                latest_date = latest_date // 10000  # 나머지를 버리고 정수 부분만 반환
                 log.info("일봉일 때 10000 으로 나누고 정수 반환값 : %s", latest_date)
             elif tick_unit == '월봉':
-                latest_date = latest_date // 1000000
+                latest_date = latest_date // 1000000  # 나머지를 버리고 정수 부분만 반환
                 latest_date = latest_date * 100
                 log.info("월봉일 때 10000 으로 나누고 곱하기 100 후 정수 반환값 : %s", latest_date)
             elif tick_unit == '주봉':
@@ -272,27 +247,23 @@ class MainWindow():
                 latest_date = int(self.get_weekly_date(latest_date))
                 log.info("주봉일 때 연도와 주차 반환값 : %s", latest_date)
                 
+            # 이미 DB 데이터가 최신인 종목들은 가져올 목록에서 제외한다
             already_up_to_date_codes = db_code_df[db_code_df['갱신날짜'] == latest_date]['종목코드'].values
-            
             log.info("이미 데이터가 최신인 종목들 : %s", already_up_to_date_codes)
             if already_up_to_date_codes.size > 0:
+                # numpy의 isin 사용하여 비교
                 fetch_code_df = fetch_code_df[~fetch_code_df['종목코드'].isin(already_up_to_date_codes)]
             else:
+                # 모든 코드가 최신이 아니라면 fetch_code_df 변경 없음
                 log.info("No codes are up to date.")
 
-        if fetch_code_df.empty:
-            print("없음")
-        else:
+            print("데이터가 최신이 아닌 종목들")
             print(fetch_code_df)
-        
-        # 수집 완료 flag 에 기록할 latest_date 변수를 최근 날짜로 고정시키는 작업
-        if self.db_name == 'sp_1min':
-            latest_date = latest_date // 10000
-            print("updated latest_date : ", latest_date)
-        
+            
         tqdm_range = tqdm.trange(len(fetch_code_df), ncols=100)
-        
+        # MongoDB에 데이터를 삽입하는 부분
         for i in tqdm_range:
+
             code = fetch_code_df.iloc[i]
             self.update_status_msg = '[{}] {}'.format(code[0], code[1])
             tqdm_range.set_description(preformat_cjk(self.update_status_msg, 25))
@@ -300,18 +271,20 @@ class MainWindow():
             from_date = 0
             if code[0] in self.db_code_df['종목코드'].tolist():
                 latest_date_entry = self.db_handler.find_item({}, self.db_name, code[0], sort=[('date', -1)])
+                # print("latest_date_entry : ", latest_date_entry)
                 from_date = latest_date_entry['date'] if latest_date_entry else 0
+                # print("from date : ", from_date)
 
-            if tick_unit == '분봉':
+            if tick_unit == '분봉':  # 분봉 데이터 받기ㅁ
                 if self.objStockChart.RequestMT(code[0], 'm', tick_range, count, self, from_date) == False:
                     continue
-            elif tick_unit == '일봉':
+            elif tick_unit == '일봉':  # 일봉 데이터 받기
                 if self.objStockChart.RequestDWM(code[0], 'D', count, self, from_date) == False:
                     continue
-            elif tick_unit == '주봉':
+            elif tick_unit == '주봉':  #주봉 데이터 받기
                 if self.objStockChart.RequestDWM(code[0], 'W', count, self, from_date) == False:
                     continue
-            elif tick_unit == '월봉':
+            elif tick_unit == '월봉':  # 월봉 데이터 받기
                 if self.objStockChart.RequestDWM(code[0], 'M', count, self, from_date) == False:
                     continue
             
@@ -321,13 +294,20 @@ class MainWindow():
             df.reset_index(inplace=True)
             df.rename(columns={'index': 'date'}, inplace=True)
 
+            # 'date' 열을 기준으로 중복된 데이터 제거
             df.drop_duplicates(subset='date', keep='last', inplace=True)
 
+            # MongoDB에 데이터 삽입
+            # 'date' 필드에 인덱스가 있는지 확인하고 없으면 생성
+            # 인덱스 정보를 가져와서 'date' 인덱스가 있는지 확인
             indexes = self.db_handler._client[self.db_name][code['종목코드']].index_information()
-            if 'date_1' not in indexes:
+            if 'date_1' not in indexes:  # 'date_1'는 오름차순 인덱스를 나타냄
+                # 'date' 필드에 대해 인덱스 생성
                 self.db_handler._client[self.db_name][code['종목코드']].create_index('date', name='date_1')
                 log.info("Index on 'date' created.")
-
+            # else:
+                # print("Index on 'date' already exists.")
+    
             operations = [
                 UpdateOne({'date': rec['date']}, {'$set': rec}, upsert=True) 
                 for rec in df.to_dict('records')]
@@ -336,17 +316,11 @@ class MainWindow():
 
             del df
             gc.collect()
-            
-            # 수집이 완료되면 sp_all_code_name 에 각 DB 의 컬렉션명으로 수집완료 처리
-            self.db_handler.update_item(
-                {'stock_code': code[0]},
-                {'$set': {self.db_name: latest_date}},
-                db_name='sp_common',
-                collection_name='sp_all_code_name'
-            )
-            
-        print(f"======== {self.db_name} 가격 데이터 수집 완료 ========")
 
+        self.update_status_msg = ''
+        self.connect_code_list_view()
+        print("============= 가격 데이터 수집 완료 ===================")
+        
     def get_weekly_date(self, latest_date):
         latest_date_str = str(latest_date)
         date_object = datetime.strptime(latest_date_str, '%Y%m%d')
@@ -467,29 +441,18 @@ class MainWindow():
             gc.collect()
 
         self.update_status_msg = ''
-        # self.connect_code_list_view()
+        self.connect_code_list_view()
 
     def update_outTime(self):
-        print("======== 시간외 단일가 수집 중 입니다. ========")
+        print("========시간외 단일가 수집중입니다.===========")
         all_collections = self.db_handler._client['sp_day'].list_collection_names()
         
         # 제외할 collection 이름들
         exclude_collections = {'U001', 'U201'}
         
-        # sp_common DB의 sp_all_code_name 컬렉션에서 stock_code가 sp_day의 컬렉션명인 데이터 조회
-        for collection in all_collections:
-            stock_info = self.db_handler.find_item(
-                {'stock_code': collection}, 
-                db_name='sp_common', 
-                collection_name='sp_all_code_name', 
-                projection={'stock_status': 1, '_id': 0}
-            )
-            if stock_info and stock_info.get('stock_status', 0) != 0:
-                exclude_collections.add(collection)
-        
         # 제외한 collection 이름 목록을 생성합니다.
         collections = [col for col in all_collections if col not in exclude_collections]
-        
+
         outTimeData = []
         for code in collections:
             if not is_market_open(): # 장 중이 아니라면
@@ -561,7 +524,7 @@ class MainWindow():
             gc.collect()
 
         self.return_status_msg = ''
-        print("======== 시간외 단일가 수집완료 ========")
+        print("========시간외 단일가 수집완료===========")
         
 if __name__ == "__main__":
     MainWindow()
