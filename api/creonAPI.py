@@ -3,6 +3,7 @@ import win32com.client
 import time
 from datetime import datetime
 from typing import TYPE_CHECKING
+import asyncio
 
 if TYPE_CHECKING:
     from creon_datareader_v1_0 import MainWindow
@@ -38,16 +39,16 @@ class CpStockChart:
             print("통신상태 오류[{}]{} 종료합니다..".format(rqStatus, rqRet))
             exit()
 
-    def apply_delay(self):
+    async def apply_delay(self):
         current_time = datetime.now().time()
         if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
-            time.sleep(0.7)  # 바쁜 시간대 딜레이
+            await asyncio.sleep(0.7)  # 바쁜 시간대 딜레이
         else:
-            time.sleep(0.25)  # 일반 시간대 딜레이
+            await asyncio.sleep(0.5)  # 일반 시간대 딜레이
 
 
     # 차트 요청 - 최근일 부터 개수 기준
-    def RequestDWM(self, code, dwm, count, caller: 'MainWindow', from_date=0):
+    async def RequestDWM(self, code, dwm, count, caller: 'MainWindow', from_date=0):
         """
         :param code: 종목코드
         :param dwm: 'D':일봉, 'W':주봉, 'M':월봉
@@ -82,7 +83,7 @@ class CpStockChart:
         while count > rcv_count:
             self.objStockChart.BlockRequest()  # 요청! 후 응답 대기
             self._check_rq_status()  # 통신상태 검사
-            self.apply_delay() # 시간당 RQ 제한으로 인해 장애가 발생하지 않도록 딜레이를 줌
+            await self.apply_delay() # 시간당 RQ 제한으로 인해 장애가 발생하지 않도록 딜레이를 줌
             # time.sleep(0.25)
 
             rcv_batch_len = self.objStockChart.GetHeaderValue(3)  # 받아온 데이터 개수
@@ -97,7 +98,6 @@ class CpStockChart:
 
             # rcv_batch_len 만큼 받은 데이터의 가장 오래된 date
             rcv_oldest_date = rcv_data['date'][-1]
-
             rcv_count += rcv_batch_len
             caller.return_status_msg = '{} / {}'.format(rcv_count, count)
             
@@ -114,7 +114,7 @@ class CpStockChart:
         return True
 
     # 차트 요청 - 분간, 틱 차트
-    def RequestMT(self, code, dwm, tick_range, count, caller: 'MainWindow', from_date=0):
+    async def RequestMT(self, code, dwm, tick_range, count, caller: 'MainWindow', from_date=0):
         """
         :param code: 종목 코드
         :param dwm: 'm':분봉, 'T':틱봉
@@ -151,7 +151,7 @@ class CpStockChart:
         while count > rcv_count:
             self.objStockChart.BlockRequest()  # 요청! 후 응답 대기
             self._check_rq_status()  # 통신상태 검사
-            self.apply_delay() # 시간당 RQ 제한으로 인해 장애가 발생하지 않도록 딜레이를 줌
+            await self.apply_delay() # 시간당 RQ 제한으로 인해 장애가 발생하지 않도록 딜레이를 줌
             # time.sleep(0.25)  
 
             rcv_batch_len = self.objStockChart.GetHeaderValue(3)  # 받아온 데이터 개수
@@ -166,7 +166,6 @@ class CpStockChart:
 
             # len 만큼 받은 데이터의 가장 오래된 date
             rcv_oldest_date = int('{}{:04}'.format(rcv_data['date'][-1], rcv_data['time'][-1]))
-
             rcv_count += rcv_batch_len
             caller.return_status_msg = '{} / {}(maximum)'.format(rcv_count, count)
 
@@ -231,15 +230,15 @@ class CpStockUniWeek:
             print(f"통신상태 오류[{rqStatus}]{rqRet}")
             raise ConnectionError(f"통신상태 오류[{rqStatus}]{rqRet}")
 
-    def apply_delay(self):
+    async def apply_delay(self):
         current_time = datetime.now().time()
         if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or \
            (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
             time.sleep(0.7)
         else:
-            time.sleep(0.25)
+            time.sleep(0.5)
 
-    def request_stock_data(self, code, count, caller=None, from_date=0):
+    async def request_stock_data(self, code, count, caller=None, from_date=0):
         self.objStockUniWeek.SetInputValue(0, code)
 
         rq_column = ('date', 'open', 'high', 'low', 'close','diff', 'diff_rate')
@@ -250,7 +249,7 @@ class CpStockUniWeek:
         while count > rcv_count:
             self.objStockUniWeek.BlockRequest()
             self._check_rq_status()
-            self.apply_delay()
+            await self.apply_delay()
 
             rcv_batch_len = self.objStockUniWeek.GetHeaderValue(1)  # 받아온 데이터 개수
             rcv_batch_len = min(rcv_batch_len, count - rcv_count)  # 정확히 count 개수만큼 받기 위함
@@ -279,4 +278,5 @@ class CpStockUniWeek:
             
         if caller:
             caller.rcv_data2 = rcv_data2  # 받은 데이터를 caller의 멤버에 저장
+        await self.apply_delay()  # 요청 후 지연 시간 추가
         return True

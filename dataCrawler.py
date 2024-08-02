@@ -1,24 +1,21 @@
 import sys
 import gc
+import asyncio
 
 from api.creonAPI import CpStockChart, CpCodeMgr, CpStockUniWeek
 
 from common.loggerConfig import setup_logger
 from util.autoLogin import autoLogin
 from util.MongoDBHandler import MongoDBHandler
-from util import decorators
-from util.pandas_to_pyqt_table import PandasModel
 from util.utils import is_market_open, available_latest_date, preformat_cjk
 
 from pymongo import UpdateOne
 
 import pandas as pd
 import tqdm
-import time
-# from datetime import datetime, timedelta
-import time as t
+# import time as t  # Remove this import
+from time import sleep  # Use specific functions from the time module
 from datetime import datetime, time as dt_time, timedelta
-
 
 log = setup_logger()  # 로거 설정
 
@@ -46,15 +43,10 @@ class MainWindow():
         self.db_code_df = pd.DataFrame()
         self.sv_view_model = None
         self.db_view_model = None
-
-        # 시간외단일가 수집 잘 못 했을 때 삭제하는 코드
-        # self.db_handler.delete_column("sp_day", "diff_rate")
-        # sp_day 의 특정 날짜의 수집 데이터 삭제하기
-        # condition = {"date": 20240516}
-        # collections = self.db_handler.list_collections("sp_day")
-        # for collection in collections:
-        #     result = self.db_handler.delete_items(condition, db_name="sp_day", collection_name=collection)
-        #     print(f"Deleted {result.deleted_count} documents from collection {collection}")
+        
+        # self.delete_outTime_column() # 실수했을 때 해당일 날짜 지우기
+        self.semaphore = asyncio.Semaphore(3) # 동시에 실행할 수 있는 최대 호출 수 설정
+        self.loop = asyncio.get_event_loop()
         
         self.code_name_list_update()
         print("종목코드 및 종목명 업데이트 완료")  # self.sv_code_df
@@ -65,41 +57,12 @@ class MainWindow():
         for db_name in self.db_name:
             self.db_name = db_name
             self.connect_code_list_view()
-            self.update_price_db()
+            self.loop.run_until_complete(self.update_price_db())
             if self.db_name == 'sp_day':
-                # 현재 시간을 확인
-                current_time = datetime.now()
-                target_time = datetime.combine(current_time.date(), dt_time(18, 1))
-                today_weekday = current_time.weekday()
-
-                # 주말이면 바로 실행
-                if today_weekday >= 5:  # Saturday or Sunday
-                    self.update_outTime()
-                else:
-                    # 현재 시간이 오후 6시 1분 이후인지 확인
-                    if current_time.time() >= dt_time(18, 1):
-                        self.update_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
-                    else:
-                        print(f"현재 시간은 {current_time.strftime('%H:%M:%S')}입니다. 오후 6시 1분까지 기다립니다.")
-                        # 남은 시간 계산
-                        time_to_wait = (target_time - current_time).total_seconds()
-
-                        # 대기 시작 알림
-                        print(f"기다리는 중입니다. 남은 시간: {int(time_to_wait // 60)}분 {int(time_to_wait % 60)}초")
-
-                        while time_to_wait > 0:
-                            # 5분마다 남은 시간을 출력
-                            if time_to_wait % 300 == 0 or time_to_wait < 300:
-                                remaining_minutes = int(time_to_wait // 60)
-                                remaining_seconds = int(time_to_wait % 60)
-                                print(f"남은 시간: {remaining_minutes}분 {remaining_seconds}초")
-
-                            # 1초 대기
-                            t.sleep(1)
-                            time_to_wait -= 1
-
-                        self.update_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
-
+                print("======== 시간외 단일가 수집 중 입니다. ========")
+                self.loop.run_until_complete(self.schedule_outTime())
+                print("======== 시간외 단일가 수집완료 ========")
+                        
     def code_name_list_update(self):
         # 1. API 서버에서 종목코드와 종목명 가져오기
         sv_code_list = self.objCodeMgr.get_code_list(1) + self.objCodeMgr.get_code_list(2)
@@ -233,7 +196,7 @@ class MainWindow():
         print(f"당일 업데이트 완료된 데이터 및 건수: {len(self.db_code_df)}")
         print(self.db_code_df)
     
-    def update_price_db(self):
+    async def update_price_db(self):
         fetch_code_df = self.sv_code_df[self.sv_code_df['종목상태'] == 0]
         db_code_df = self.db_code_df
         
@@ -241,20 +204,20 @@ class MainWindow():
             tick_unit = '분봉'
             count = 2000
             tick_range = 1
-            columns=['open', 'high', 'low', 'close', 'volume', 'value']
+            columns = ['open', 'high', 'low', 'close', 'volume', 'value']
         elif self.db_name == 'sp_day':
             tick_unit = '일봉'
             count = 14
             tick_range = 1
-            columns=['open', 'high', 'low', 'close', 'volume', 'value', 'marketC']
+            columns = ['open', 'high', 'low', 'close', 'volume', 'value', 'marketC']
         elif self.db_name == 'sp_week':
             tick_unit = '주봉'
             count = 2000
-            columns=['open', 'high', 'low', 'close', 'volume', 'value']
+            columns = ['open', 'high', 'low', 'close', 'volume', 'value']
         elif self.db_name == 'sp_month':
             tick_unit = '월봉'
             count = 500
-            columns=['open', 'high', 'low', 'close', 'volume', 'value']
+            columns = ['open', 'high', 'low', 'close', 'volume', 'value']
         else:
             raise ValueError("Invalid database name provided")
 
@@ -271,9 +234,9 @@ class MainWindow():
                 latest_date = latest_date // 10000
                 latest_date = int(self.get_weekly_date(latest_date))
                 log.info("주봉일 때 연도와 주차 반환값 : %s", latest_date)
-                
+                    
             already_up_to_date_codes = db_code_df[db_code_df['갱신날짜'] == latest_date]['종목코드'].values
-            
+                
             log.info("이미 데이터가 최신인 종목들 : %s", already_up_to_date_codes)
             if already_up_to_date_codes.size > 0:
                 fetch_code_df = fetch_code_df[~fetch_code_df['종목코드'].isin(already_up_to_date_codes)]
@@ -290,30 +253,47 @@ class MainWindow():
             latest_date = latest_date // 10000
             print("updated latest_date : ", latest_date)
         
-        tqdm_range = tqdm.trange(len(fetch_code_df), ncols=100)
+        tqdm_range = tqdm.tqdm(total=len(fetch_code_df), ncols=100)
         
-        for i in tqdm_range:
+        tasks = []
+        for i in range(len(fetch_code_df)):
             code = fetch_code_df.iloc[i]
             self.update_status_msg = '[{}] {}'.format(code[0], code[1])
             tqdm_range.set_description(preformat_cjk(self.update_status_msg, 25))
+            tasks.append(self.update_price_for_code(code, tick_unit, count, columns, tick_range, latest_date, tqdm_range))
+            
+        await asyncio.gather(*tasks)
+        
+        tqdm_range.close()
+        
+        if self.db_name == 'sp_1min':
+            print(f"======== {self.db_name} 가격 데이터 수집 완료 ========")
+        elif self.db_name == 'sp_day':
+            print(f"======== {self.db_name} 가격 데이터 수집 완료 ========")
 
+    async def update_price_for_code(self, code, tick_unit, count, columns, tick_range, latest_date, tqdm_range):
+        async with self.semaphore:
+            await self.objStockChart.apply_delay()
             from_date = 0
             if code[0] in self.db_code_df['종목코드'].tolist():
                 latest_date_entry = self.db_handler.find_item({}, self.db_name, code[0], sort=[('date', -1)])
                 from_date = latest_date_entry['date'] if latest_date_entry else 0
 
             if tick_unit == '분봉':
-                if self.objStockChart.RequestMT(code[0], 'm', tick_range, count, self, from_date) == False:
-                    continue
+                success = await self.objStockChart.RequestMT(code[0], 'm', tick_range, count, self, from_date)
             elif tick_unit == '일봉':
-                if self.objStockChart.RequestDWM(code[0], 'D', count, self, from_date) == False:
-                    continue
+                success = await self.objStockChart.RequestDWM(code[0], 'D', count, self, from_date)
             elif tick_unit == '주봉':
-                if self.objStockChart.RequestDWM(code[0], 'W', count, self, from_date) == False:
-                    continue
+                success = await self.objStockChart.RequestDWM(code[0], 'W', count, self, from_date)
             elif tick_unit == '월봉':
-                if self.objStockChart.RequestDWM(code[0], 'M', count, self, from_date) == False:
-                    continue
+                success = await self.objStockChart.RequestDWM(code[0], 'M', count, self, from_date)
+
+            if not success:
+                return
+             
+            if 'date' not in self.rcv_data:
+                log.error(f"'date' key not found in rcv_data for code {code[0]}")
+                return
             
             df = pd.DataFrame(self.rcv_data, columns=columns, index=self.rcv_data['date'])
             df = df.loc[:from_date].iloc[:-1] if from_date != 0 else df
@@ -344,32 +324,44 @@ class MainWindow():
                 db_name='sp_common',
                 collection_name='sp_all_code_name'
             )
-            
-        print(f"======== {self.db_name} 가격 데이터 수집 완료 ========")
+            tqdm_range.update(1)  # 한 종목 코드 완료 시 프로그레스바 업데이트
 
-    def get_weekly_date(self, latest_date):
-        latest_date_str = str(latest_date)
-        date_object = datetime.strptime(latest_date_str, '%Y%m%d')
-        
-        # 해당 월의 첫 날
-        first_day_of_month = datetime(date_object.year, date_object.month, 1)
-        
-        # 해당 월의 첫 번째 일요일 찾기
-        first_sunday = first_day_of_month + timedelta(days=(6 - first_day_of_month.weekday()))
-        
-        # 주차 계산 (첫 일요일 이전 날짜들은 첫 주차로 계산)
-        if date_object < first_sunday:
-            week_of_month = 1
+    async def schedule_outTime(self):
+        # 현재 시간을 확인
+        current_time = datetime.now()
+        target_time = datetime.combine(current_time.date(), dt_time(18, 1))
+        today_weekday = current_time.weekday()
+
+        # 주말이면 바로 실행
+        if today_weekday >= 5:  # Saturday or Sunday
+            await self.handle_outTime()
         else:
-            week_of_month = ((date_object - first_sunday).days // 7) + 1
-        
-        # 날짜 형식 YYYYMMWW (WW는 주차 * 10)
-        formatted_date = f"{date_object.year}{date_object.month:02}{week_of_month * 10}"
-        
-        return formatted_date
+            # 현재 시간이 오후 6시 1분 이후인지 확인
+            if current_time.time() >= dt_time(18, 1):
+                await self.handle_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
+            else:
+                print(f"현재 시간은 {current_time.strftime('%H:%M:%S')}입니다. 오후 6시 1분까지 기다립니다.")
+                # 남은 시간 계산
+                time_to_wait = (target_time - current_time).total_seconds()
+
+                # 대기 시작 알림
+                print(f"기다리는 중입니다. 남은 시간: {int(time_to_wait // 60)}분 {int(time_to_wait % 60)}초")
+
+                while time_to_wait > 0:
+                    # 5분마다 남은 시간을 출력
+                    if time_to_wait % 300 == 0 or time_to_wait < 300:
+                        remaining_minutes = int(time_to_wait // 60)
+                        remaining_seconds = int(time_to_wait % 60)
+                        print(f"남은 시간: {remaining_minutes}분 {remaining_seconds}초")
+
+                    # 1초 대기
+                    sleep(1)
+                    time_to_wait -= 1
+
+                await self.handle_outTime()  # 시간외 단일가 데이터 업데이트 함수 추가
 
     # sp_day 에 marketC 컬럼을 추가
-    def update_marketC_col(self):
+    async def update_marketC_col(self):
         
         fetch_code_df = self.sv_code_df # API 서버에 있는 종목코드, 종목명 리스트
         db_code_df = self.db_code_df # DB 에 있는 종목코드, 종목명 리스트
@@ -421,16 +413,23 @@ class MainWindow():
             print("데이터가 최신이 아닌 종목들")
             print("fetch_code_df : ", fetch_code_df)
             
-        tqdm_range = tqdm.trange(len(fetch_code_df), ncols=100)
+        tqdm_range = tqdm.tqdm(total=len(fetch_code_df), ncols=100)
         # MongoDB에 데이터를 삽입하는 부분
-        for i in tqdm_range:
-            
+        tasks = []
+        for i in range(len(fetch_code_df)):
+            await self.objStockChart.apply_delay()
             # start_time = time.time()
-            
             code = fetch_code_df.iloc[i]
             self.update_status_msg = '[{}] {}'.format(code[0], code[1])
             tqdm_range.set_description(preformat_cjk(self.update_status_msg, 25))
+            tasks.append(self.update_marketC_for_code(code, tick_unit, count, columns, tick_range, tqdm_range))
 
+        await asyncio.gather(*tasks)
+        tqdm_range.close()
+
+    async def update_marketC_for_code(self, code, tick_unit, count, columns, tick_range, tqdm_range):
+        async with self.semaphore:
+            await self.objStockChart.apply_delay()
             from_date = 0
             if code[0] in self.db_code_df['종목코드'].tolist():
                 # marketC 컬럼이 있는 문서 중 가장 최신의 날짜를 찾음
@@ -443,8 +442,9 @@ class MainWindow():
                 )
                 from_date = latest_date_entry['date'] if latest_date_entry else 0
             if tick_unit == '일봉':  # 일봉 데이터 받기
-                if self.objStockChart.RequestDWM(code[0], 'D', count, self, from_date) == False:
-                    continue
+                success = await self.objStockChart.RequestDWM(code[0], 'D', count, self, from_date)
+                if not success:
+                    return
             
             df = pd.DataFrame(self.rcv_data, columns=columns, index=self.rcv_data['date'])
             df = df.loc[:from_date].iloc[:-1] if from_date != 0 else df
@@ -465,12 +465,10 @@ class MainWindow():
 
             del df
             gc.collect()
+            tqdm_range.update(1)  # 한 종목 코드 완료 시 프로그레스바 업데이트
 
-        self.update_status_msg = ''
-        # self.connect_code_list_view()
+    async def handle_outTime(self):
 
-    def update_outTime(self):
-        print("======== 시간외 단일가 수집 중 입니다. ========")
         all_collections = self.db_handler._client['sp_day'].list_collection_names()
         
         # 제외할 collection 이름들
@@ -519,13 +517,22 @@ class MainWindow():
         print("fetch_code_df : ", len(fetch_code_df))
 
         count = 200
-        tqdm_range = tqdm.trange(len(fetch_code_df), ncols=100)
+        tqdm_range = tqdm.tqdm(total=len(fetch_code_df), ncols=100)
         
-        for i in tqdm_range:
+        tasks = []
+        for i in range(len(fetch_code_df)):
             code = fetch_code_df.iloc[i]
             self.return_status_msg = '[{}] {}'.format(code['종목코드'], code['종목명'])
             tqdm_range.set_description(self.return_status_msg)
+            tasks.append(self.update_outTime_for_code(code, count, tqdm_range))
             
+        await asyncio.gather(*tasks)
+        tqdm_range.close()
+
+        
+    async def update_outTime_for_code(self, code, count, tqdm_range):
+        async with self.semaphore:
+            await self.objStockUniWeek.apply_delay()
             from_date = 0
             # diff_rate가 있는 가장 최신의 date를 찾음
             latest_entry_with_diff_rate = self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code['종목코드'], sort=[('date', -1)])
@@ -534,34 +541,65 @@ class MainWindow():
             
             # 데이터가 존재하지 않으면 diff_rate를 요청하지 않음
             if not earliest_entry:
-                continue
+                return
 
             if latest_entry_with_diff_rate:
                 from_date = latest_entry_with_diff_rate['date']
             else:
                 from_date = earliest_entry['date']
 
-            if self.objStockUniWeek.request_stock_data(code['종목코드'], count, self, from_date) == False:
-                continue
+            success = await self.objStockUniWeek.request_stock_data(code['종목코드'], count, self, from_date)
+
+            if not success:
+                return
 
             df = pd.DataFrame(self.rcv_data2)
-            df = df[df['date'] > from_date].iloc[::-1]
-            df.reset_index(inplace=True, drop=True)
+            if 'date' in df.columns:
+                df = df[df['date'] > from_date].iloc[::-1]
+                df.reset_index(inplace=True, drop=True)
 
-            df.drop_duplicates(subset='date', keep='last', inplace=True)
-            df.dropna(subset=['date'], inplace=True)  # date 컬럼이 null인 행 제거
-            operations = [
-                UpdateOne({'date': rec['date']}, {'$set': {'diff_rate': rec['diff_rate']}}, upsert=False)
-                for rec in df.to_dict('records')
-            ]
-            if operations:
-                self.db_handler._client['sp_day'][code['종목코드']].bulk_write(operations, ordered=False)
+                df.drop_duplicates(subset='date', keep='last', inplace=True)
+                df.dropna(subset=['date'], inplace=True)  # date 컬럼이 null인 행 제거
+                operations = [
+                    UpdateOne({'date': rec['date']}, {'$set': {'diff_rate': rec['diff_rate']}}, upsert=False)
+                    for rec in df.to_dict('records')
+                ]
+                if operations:
+                    self.db_handler._client['sp_day'][code['종목코드']].bulk_write(operations, ordered=False)
             
             del df
             gc.collect()
-
-        self.return_status_msg = ''
-        print("======== 시간외 단일가 수집완료 ========")
+            tqdm_range.update(1)  # 한 종목 코드 완료 시 프로그레스바 업데이트
         
+    # # sp_day 의 특정 날짜의 수집 데이터 삭제하기
+    # def delete_outTime_column(self):
+    #     # sp_day 의 특정 날짜의 수집 데이터 삭제하기
+    #     condition = {"date": 20240802}
+    #     collections = self.db_handler.list_collections("sp_day")
+    #     for collection in collections:
+    #         result = self.db_handler.delete_items(condition, db_name="sp_day", collection_name=collection)
+    #         print(f"Deleted {result.deleted_count} documents from collection {collection}")
+
+    def get_weekly_date(self, latest_date):
+        latest_date_str = str(latest_date)
+        date_object = datetime.strptime(latest_date_str, '%Y%m%d')
+        
+        # 해당 월의 첫 날
+        first_day_of_month = datetime(date_object.year, date_object.month, 1)
+        
+        # 해당 월의 첫 번째 일요일 찾기
+        first_sunday = first_day_of_month + timedelta(days=(6 - first_day_of_month.weekday()))
+        
+        # 주차 계산 (첫 일요일 이전 날짜들은 첫 주차로 계산)
+        if date_object < first_sunday:
+            week_of_month = 1
+        else:
+            week_of_month = ((date_object - first_sunday).days // 7) + 1
+        
+        # 날짜 형식 YYYYMMWW (WW는 주차 * 10)
+        formatted_date = f"{date_object.year}{date_object.month:02}{week_of_month * 10}"
+        
+        return formatted_date
+
 if __name__ == "__main__":
     MainWindow()
