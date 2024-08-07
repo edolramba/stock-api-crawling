@@ -60,6 +60,7 @@ class MainWindow():
             self.loop.run_until_complete(self.update_price_db())
             if self.db_name == 'sp_day':
                 print("======== 시간외 단일가 수집 중 입니다. ========")
+                self.semaphore = asyncio.Semaphore(2) # 동시에 실행할 수 있는 최대 호출 수 설정
                 self.loop.run_until_complete(self.schedule_outTime())
                 print("======== 시간외 단일가 수집완료 ========")
                         
@@ -244,9 +245,9 @@ class MainWindow():
                 log.info("No codes are up to date.")
 
         if fetch_code_df.empty:
-            print("없음")
+            print(f"업데이트 할 종목 없음")
         else:
-            print(fetch_code_df)
+            print(f"업데이트 필요 종목(fetch_code_df): {fetch_code_df}")
         
         # 수집 완료 flag 에 기록할 latest_date 변수를 최근 날짜로 고정시키는 작업
         if self.db_name == 'sp_1min':
@@ -278,6 +279,8 @@ class MainWindow():
             if code[0] in self.db_code_df['종목코드'].tolist():
                 latest_date_entry = self.db_handler.find_item({}, self.db_name, code[0], sort=[('date', -1)])
                 from_date = latest_date_entry['date'] if latest_date_entry else 0
+            # 현재 업데이트 중인 종목을 tqdm에 표시
+            tqdm_range.set_description(f"[{code[0]}] {self.objCodeMgr.get_code_name(code[0])}")
 
             if tick_unit == '분봉':
                 success = await self.objStockChart.RequestMT(code[0], 'm', tick_range, count, self, from_date)
@@ -288,12 +291,10 @@ class MainWindow():
             elif tick_unit == '월봉':
                 success = await self.objStockChart.RequestDWM(code[0], 'M', count, self, from_date)
 
-            if not success:
-                return
-             
-            if 'date' not in self.rcv_data:
-                log.error(f"'date' key not found in rcv_data for code {code[0]}")
-                return
+            if not success or 'date' not in self.rcv_data or len(self.rcv_data['date']) == 0:
+                tqdm_range.set_description(f"[{code[0]}] 데이터 없음")
+                tqdm_range.update(1)
+                return  # 데이터가 없는 경우 건너뜀
             
             df = pd.DataFrame(self.rcv_data, columns=columns, index=self.rcv_data['date'])
             df = df.loc[:from_date].iloc[:-1] if from_date != 0 else df
@@ -324,6 +325,7 @@ class MainWindow():
                 db_name='sp_common',
                 collection_name='sp_all_code_name'
             )
+            tqdm_range.set_description(f"[{self.objCodeMgr.get_code_name(code[0])}({code[0]})] 업데이트 완료")
             tqdm_range.update(1)  # 한 종목 코드 완료 시 프로그레스바 업데이트
 
     async def schedule_outTime(self):
@@ -468,7 +470,6 @@ class MainWindow():
             tqdm_range.update(1)  # 한 종목 코드 완료 시 프로그레스바 업데이트
 
     async def handle_outTime(self):
-
         all_collections = self.db_handler._client['sp_day'].list_collection_names()
         
         # 제외할 collection 이름들
@@ -493,9 +494,11 @@ class MainWindow():
             if not is_market_open(): # 장 중이 아니라면
                 price_latest = self.db_handler.find_item({}, 'sp_day', code, sort=[('date', -1)])
                 price_lastest_date = price_latest['date']
-                
+
                 if self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code, sort=[('date', -1)]):
                     latest_entry_with_diff_rate = self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code, sort=[('date', -1)])
+                    # print(f"시간외 단일가 업데이트 안된 종목코드 : {latest_entry_with_diff_rate}")
+                    
                     if latest_entry_with_diff_rate['date'] >= price_lastest_date:
                         pass
                     else:
@@ -513,34 +516,36 @@ class MainWindow():
                     stock_name = item['stock_name'] if item else None
                     outTimeData.append({'종목코드': code, '종목명': stock_name})
 
+
         fetch_code_df = pd.DataFrame(outTimeData)
-        print("fetch_code_df : ", len(fetch_code_df))
+        print("시간외 업데이트 필요한 종목의 수 (fetch_code_df) : ", len(fetch_code_df))
 
         count = 200
         tqdm_range = tqdm.tqdm(total=len(fetch_code_df), ncols=100)
-        
+
         tasks = []
         for i in range(len(fetch_code_df)):
             code = fetch_code_df.iloc[i]
             self.return_status_msg = '[{}] {}'.format(code['종목코드'], code['종목명'])
             tqdm_range.set_description(self.return_status_msg)
             tasks.append(self.update_outTime_for_code(code, count, tqdm_range))
-            
+
         await asyncio.gather(*tasks)
         tqdm_range.close()
-
         
     async def update_outTime_for_code(self, code, count, tqdm_range):
         async with self.semaphore:
             await self.objStockUniWeek.apply_delay()
             from_date = 0
-            # diff_rate가 있는 가장 최신의 date를 찾음
+            # diff_rate가 없는 가장 최신의 date를 찾음
             latest_entry_with_diff_rate = self.db_handler.find_item({'diff_rate': {'$exists': True}}, 'sp_day', code['종목코드'], sort=[('date', -1)])
             # 해당 종목코드의 데이터 중 가장 오래된 날짜를 찾음
             earliest_entry = self.db_handler.find_item({}, 'sp_day', code['종목코드'], sort=[('date', 1)])
             
             # 데이터가 존재하지 않으면 diff_rate를 요청하지 않음
             if not earliest_entry:
+                tqdm_range.set_description(f"[{code['종목명']}({code['종목코드']})] 데이터 없음")
+                tqdm_range.update(1)
                 return
 
             if latest_entry_with_diff_rate:
@@ -551,6 +556,8 @@ class MainWindow():
             success = await self.objStockUniWeek.request_stock_data(code['종목코드'], count, self, from_date)
 
             if not success:
+                tqdm_range.set_description(f"[{code['종목명']}({code['종목코드']})] 데이터 없음")
+                tqdm_range.update(1)
                 return
 
             df = pd.DataFrame(self.rcv_data2)
@@ -569,16 +576,17 @@ class MainWindow():
             
             del df
             gc.collect()
+            tqdm_range.set_description(f"[{code['종목명']}({code['종목코드']})] 업데이트 완료")
             tqdm_range.update(1)  # 한 종목 코드 완료 시 프로그레스바 업데이트
         
-    # # sp_day 의 특정 날짜의 수집 데이터 삭제하기
-    # def delete_outTime_column(self):
-    #     # sp_day 의 특정 날짜의 수집 데이터 삭제하기
-    #     condition = {"date": 20240802}
-    #     collections = self.db_handler.list_collections("sp_day")
-    #     for collection in collections:
-    #         result = self.db_handler.delete_items(condition, db_name="sp_day", collection_name=collection)
-    #         print(f"Deleted {result.deleted_count} documents from collection {collection}")
+    # sp_day 의 특정 날짜의 수집 데이터 삭제하기
+    def delete_outTime_column(self):
+        # sp_day 의 특정 날짜의 수집 데이터 삭제하기
+        condition = {"date": 20240807}
+        collections = self.db_handler.list_collections("sp_day")
+        for collection in collections:
+            result = self.db_handler.delete_items(condition, db_name="sp_day", collection_name=collection)
+            print(f"Deleted {result.deleted_count} documents from collection {collection}")
 
     def get_weekly_date(self, latest_date):
         latest_date_str = str(latest_date)

@@ -10,12 +10,20 @@ if TYPE_CHECKING:
     
 g_objCpStatus = win32com.client.Dispatch('CpUtil.CpCybos')
 
+def pump_messages():
+    while True:
+        msg = win32com.client.pythoncom.PumpWaitingMessages()
+        if not msg:
+            break
+        
 # original_func 콜하기 전에 PLUS 연결 상태 체크하는 데코레이터
 def check_PLUS_status(original_func):
     def wrapper(*args, **kwargs):
         if not g_objCpStatus.IsConnect:
             print("PLUS가 정상적으로 연결되지 않음.")  # 연결 실패 메시지 출력
             raise ConnectionError("PLUS가 정상적으로 연결되지 않음.")  # 예외 발생
+        print("already connected.")
+        pump_messages()  # 메시지 루프 처리 추가
         return original_func(*args, **kwargs)
     return wrapper
 
@@ -93,7 +101,7 @@ class CpStockChart:
                     rcv_data[col].append(self.objStockChart.GetDataValue(col_idx, i))
 
             if len(rcv_data['date']) == 0:  # 데이터가 없는 경우
-                print(code, '데이터 없음')
+                # print(code, '데이터 없음')
                 return False
 
             # rcv_batch_len 만큼 받은 데이터의 가장 오래된 date
@@ -161,7 +169,7 @@ class CpStockChart:
                     rcv_data[col].append(self.objStockChart.GetDataValue(col_idx, i))
 
             if len(rcv_data['date']) == 0:  # 데이터가 없는 경우
-                print(code, '데이터 없음')
+                # print(code, '데이터 없음')
                 return False
 
             # len 만큼 받은 데이터의 가장 오래된 date
@@ -229,14 +237,14 @@ class CpStockUniWeek:
         if rqStatus != 0:
             print(f"통신상태 오류[{rqStatus}]{rqRet}")
             raise ConnectionError(f"통신상태 오류[{rqStatus}]{rqRet}")
-
+            
     async def apply_delay(self):
         current_time = datetime.now().time()
         if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or \
-           (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
-            time.sleep(0.7)
+        (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
+            await asyncio.sleep(0.7)
         else:
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
 
     async def request_stock_data(self, code, count, caller=None, from_date=0):
         self.objStockUniWeek.SetInputValue(0, code)
@@ -251,9 +259,9 @@ class CpStockUniWeek:
             self._check_rq_status()
             await self.apply_delay()
 
-            rcv_batch_len = self.objStockUniWeek.GetHeaderValue(1)  # 받아온 데이터 개수
-            rcv_batch_len = min(rcv_batch_len, count - rcv_count)  # 정확히 count 개수만큼 받기 위함
-            
+            rcv_batch_len = self.objStockUniWeek.GetHeaderValue(1)
+            rcv_batch_len = min(rcv_batch_len, count - rcv_count)
+
             for i in range(rcv_batch_len):
                 item_date = self.objStockUniWeek.GetDataValue(0, i)
                 if item_date < from_date:
@@ -262,21 +270,22 @@ class CpStockUniWeek:
                 for col_idx, col in enumerate(rq_column):
                     rcv_data2[col].append(self.objStockUniWeek.GetDataValue(col_idx, i))
 
-            if len(rcv_data2['date']) == 0:  # 데이터가 없는 경우
-                print(code, '데이터 없음')
+            if len(rcv_data2['date']) == 0:
+                # print(code, '데이터 없음')
                 return False
 
             rcv_oldest_date = rcv_data2['date'][-1]
             rcv_count += rcv_batch_len
             if caller:
                 caller.return_status_msg = '{} / {}'.format(rcv_count, count)
-            
+
             if not self.objStockUniWeek.Continue:
                 break
             if rcv_oldest_date < from_date:
                 break
-            
+
         if caller:
-            caller.rcv_data2 = rcv_data2  # 받은 데이터를 caller의 멤버에 저장
-        await self.apply_delay()  # 요청 후 지연 시간 추가
+            caller.rcv_data2 = rcv_data2
+        await self.apply_delay()
         return True
+
