@@ -17,9 +17,9 @@ def available_latest_date():
     now = dt.datetime.now()
     mmhh = int('{}{:02}'.format(now.hour, now.minute))
     
-    # 장중에는 최신 데이터 연속적으로 발생하므로 None 반환 
-    if is_market_open():
-        return None
+    # # 장중에는 최신 데이터 연속적으로 발생하므로 None 반환 
+    # if is_market_open():
+    #     return None
 
     # 장중이 아닌경우에 대해.
     latest_date = now.replace(hour=15, minute=30)
@@ -34,7 +34,7 @@ def available_latest_date():
         return cvt_dt_to_int(latest_date)
     else:  # 장 개장 전
         latest_date = latest_date - dt.timedelta(days=1)
-        if latest_date.weekday() == 6:
+        if latest_date.weekday() == 6:  # 만약 전날이 일요일인 경우 금요일로 조정
             latest_date = latest_date - dt.timedelta(days=2)
         return cvt_dt_to_int(latest_date)
 

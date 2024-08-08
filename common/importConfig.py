@@ -21,6 +21,12 @@ class importConfig:
             pwdcert = self.config[section]['pwdcert']
             return {"id": id, "pwd": pwd, "pwdcert": pwdcert}
         
+        elif section == "TELEGRAM":
+            chat_id = self.config[section]['chat_id']
+            self_token = self.config[section]['self_token']
+            self_chat_id = self.config[section]['self_chat_id']
+            return {"chat_id": chat_id, "self_token": self_token, "self_chat_id": self_chat_id}
+        
         else:
             print("Not yet setting section")
             return None

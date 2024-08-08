@@ -52,7 +52,7 @@ class CpStockChart:
         if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
             await asyncio.sleep(0.7)  # 바쁜 시간대 딜레이
         else:
-            await asyncio.sleep(0.5)  # 일반 시간대 딜레이
+            await asyncio.sleep(0.25)  # 일반 시간대 딜레이
 
 
     # 차트 요청 - 최근일 부터 개수 기준
@@ -244,7 +244,7 @@ class CpStockUniWeek:
         (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
             await asyncio.sleep(0.7)
         else:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.25)
 
     async def request_stock_data(self, code, count, caller=None, from_date=0):
         self.objStockUniWeek.SetInputValue(0, code)
@@ -286,6 +286,6 @@ class CpStockUniWeek:
 
         if caller:
             caller.rcv_data2 = rcv_data2
-        await self.apply_delay()
+        # await self.apply_delay()
         return True
 
