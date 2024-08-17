@@ -1,5 +1,5 @@
 # 설치 cli
-pip3 install virtualenv virtualenvwrapper
+pip3 install virtualenv virtualenvwrapper virtualenvwrapper-win
 # 가상환경 생성 / 삭제
 mkvirtualenv --python=python[version] [가상환경이름]
 mkvirtualenv [가상환경이름] -p [python-path]
@@ -7,5 +7,12 @@ rmvirtualenv [가상환경이름]
 # 가상환경 리스트확인 / 접속
 workon
 workon [가상환경이름]
-# 32bit 설치를 위해서는 32bit 파이썬 설치버젼이 있어야 함
+# 32bit 설치를 위해서는 32bit 파이썬 설치버젼이 있어야 함 (원본 - 구버전으로 신규 설치할 때부터는 "신규 설치 방법" 가이드 참고)
 mkvirtualenv --python="C:\Python37-32\python.exe" stock-api-crawling
+
+# 신규 설치 방법 
+# 01. 파이썬 32bit 3.7.9 버전 (https://www.python.org/downloads/release/python-379/) 을 C:\Python\37-32 에 설치하자.
+# 02. 아래의 명령어로 가상환경을 설치해준다.
+pip3 install virtualenv virtualenvwrapper virtualenvwrapper-win
+# 03. Python 패키지 관리를 위한 폴더를 고려하여 아래처럼 변경해서 설치하자. (신규설치)
+mkvirtualenv --python="C:\Python\37-32\python.exe" stock-api-crawling
