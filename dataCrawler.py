@@ -212,7 +212,7 @@ class MainWindow():
         
         if self.db_name == 'sp_1min':
             tick_unit = '분봉'
-            count = 2000
+            count = 200000
             tick_range = 1
             columns = ['open', 'high', 'low', 'close', 'volume', 'value']
         elif self.db_name == 'sp_day':
