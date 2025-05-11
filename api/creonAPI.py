@@ -49,10 +49,11 @@ class CpStockChart:
 
     async def apply_delay(self):
         current_time = datetime.now().time()
-        if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
-            await asyncio.sleep(0.7)  # 바쁜 시간대 딜레이
+        if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or \
+        (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
+            await asyncio.sleep(1.0)  # 0.7초에서 1.0초로 증가
         else:
-            await asyncio.sleep(0.25)  # 일반 시간대 딜레이
+            await asyncio.sleep(0.5)  # 0.25초에서 0.5초로 증가
 
 
     # 차트 요청 - 최근일 부터 개수 기준
@@ -242,9 +243,9 @@ class CpStockUniWeek:
         current_time = datetime.now().time()
         if (current_time >= datetime.strptime("09:00", "%H:%M").time() and current_time <= datetime.strptime("09:10", "%H:%M").time()) or \
         (current_time >= datetime.strptime("15:20", "%H:%M").time() and current_time <= datetime.strptime("15:30", "%H:%M").time()):
-            await asyncio.sleep(0.7)
+            await asyncio.sleep(1.0)  # 0.7초에서 1.0초로 증가
         else:
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.5)  # 0.25초에서 0.5초로 증가
 
     async def request_stock_data(self, code, count, caller=None, from_date=0):
         self.objStockUniWeek.SetInputValue(0, code)

@@ -11,8 +11,24 @@ workon [가상환경이름]
 mkvirtualenv --python="C:\Python37-32\python.exe" stock-api-crawling
 
 # 신규 설치 방법 
-# 01. 파이썬 32bit 3.7.9 버전 (https://www.python.org/downloads/release/python-379/) 을 C:\Python\37-32 에 설치하자.
+# 01. 파이썬 32bit 3.8.10 버전 (https://www.python.org/downloads/release/python-3810/) 을 C:\Python\38-32 에 설치하자.
 # 02. 아래의 명령어로 가상환경을 설치해준다.
 pip3 install virtualenv virtualenvwrapper virtualenvwrapper-win
 # 03. Python 패키지 관리를 위한 폴더를 고려하여 아래처럼 변경해서 설치하자. (신규설치)
-mkvirtualenv --python="C:\Python\37-32\python.exe" stock-api-crawling
+mkvirtualenv --python="C:\Python\38-32\python.exe" stock-api-crawling
+# 04. 가상환경 전환 후 requirements 를 이용한 패키지 설치
+workon stock-api-crawling
+pip3 install -r requirements.txt
+# 05. log 폴더 생성
+C:\Dev\stock-api-crawling\log
+
+# 수집모드
+python dataCrawler.py --mode collect
+# 정합성 검증모드
+python dataCrawler.py --mode validate
+# bson 오류 체크모드 
+python dataCrawler.py --mode chkbsonerror
+# bson 오류 삭제모드
+python dataCrawler.py --mode deletebsonerror
+# 데이터 검증 차트 모드
+python dataCrawler.py --mode chart
