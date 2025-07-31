@@ -333,7 +333,8 @@ class MainWindow():
         today_weekday = current_time.weekday()
 
         # 주말이면 바로 실행
-        if today_weekday >= 5:  # Saturday or Sunday
+        if today_weekday >= 0:  # Saturday or Sunday
+        # if today_weekday >= 5:  # Saturday or Sunday
             await self.handle_outTime()
         else:
             # 현재 시간이 오후 6시 1분 이후인지 확인
